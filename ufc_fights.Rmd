@@ -1,0 +1,932 @@
+---
+title: "SAP projekt"
+authors: Matija Pintarić, Filip Šimičević, Luka Vukelić, Fran Žužić
+date: "2022-12-19"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+# Instalacija paketa
+#install.packages("xlsx")
+#install.packages("readxl")
+#install.packages("stringr")
+#install.packages("base")
+#install.packages("magrittr")
+#install.packages("ggplot2", dependencies = TRUE)
+#install.packages("ggplot2")
+#install.packages("gplots")
+
+```
+
+Učitavamo potrebne biblioteke.
+```{r echo=T, error=FALSE, warning=FALSE, message=FALSE}
+library(dplyr)
+library(stringr)
+library(base)
+library(magrittr)
+library(xlsx)
+library(readxl)
+library(dplyr)
+library(tidyverse)
+library(gplots)
+library(ggplot2)
+library(broom)
+library(readr)
+library(purrr)
+```
+
+Pogledajmo podatke kojima raspolažemo. Stvaramo odgovarajuće dataframes čitajući iz datoteka fighter_details.csv i total_fight_data.csv.
+
+```{r}
+fighter_data = read.csv("fighter_details.csv")
+dim(fighter_data)
+
+fight_data = read.csv("total_fight_data.csv" ,header = T,sep = ";")
+
+```
+Ukupno imamo 3596 registriranih boraca. Za njih je zabilježeno 14 atributa, a oni su:
+
+```{r}
+names(fighter_data)
+View(fighter_data)
+sapply(fighter_data, class)
+```
+## Zadatak 1. Možemo li očekivati završetak borbe nokautom ovisno o razlici u dužini ruku između boraca?
+
+Zanimaju nas borci koji imaju zabilježenu duljinu ruku.
+
+```{r}
+fighter_data[fighter_data == ''] <- NA
+for (col_name in names(fighter_data)){
+  if (sum(is.na(fighter_data[,col_name])) > 0){
+    cat('Ukupno nedostajućih vrijednosti za varijablu ',col_name, ': ', sum(is.na(fighter_data[,col_name])),'\n')
+  }
+}
+#fighter_reach_data <- na.omit(fighter_data$Reach)
+fighter_reach_data = fighter_data[!is.na(fighter_data$Reach),]
+
+```
+
+Za početak nas zanima je li duljina ruku normalno distribuirana varijabla, što očekujemo da je.Potvrđujemo sa histogramom.
+
+```{r}
+fighter_reach_data <- fighter_reach_data %>%
+  mutate_at("Reach", str_replace, "\"", "")
+
+fighter_reach_data[,"Reach"] <- sapply(fighter_reach_data[,"Reach"], as.numeric)
+
+h = hist(fighter_reach_data$Reach,
+         main="Histogram duljina ruku",
+         xlab="Duljina (in)",
+         ylab="Frekvencija",
+         col="lightgreen")
+
+```
+Ovako izgledaju varijable objekta s kojim radimo.
+```{r}
+fighter_reach_data = fighter_reach_data[c("fighter_name", "Reach")]
+summary(fighter_reach_data)
+```
+
+Podatke o borbama provjeravamo za vrijednost win_by i redove s praznim vrijednostima izbacujemo. Zatim uzimamo samo atribute koji su potrebni za naš test (2 borca i tip pobjede)
+
+```{r}
+fight_data[fight_data == ''] <- NA
+for (col_name in names(fight_data)){
+  if (sum(is.na(fight_data[,col_name])) > 0){
+    cat('Ukupno nedostajućih vrijednosti za varijablu ',col_name, ': ', sum(is.na(fight_data[,col_name])),'\n')
+  }
+}
+
+fight_data = fight_data[!is.na(fight_data$win_by),]
+fight_data = fight_data[!is.na(fight_data$Winner),]
+win_data <- fight_data[c("B_fighter", "R_fighter", "win_by")]
+```
+
+Moramo za svaku borbu u kojoj znamo raspon ruku oba borca grupirati razliku raspona u 2 grupe. Onu u kojoj je borba završila sa KO/TKO i u onu koju nije.
+
+```{r}
+dif_KO1 = merge(win_data, fighter_reach_data, by.x = "B_fighter", by.y="fighter_name")
+dif_KO = merge(dif_KO1, fighter_reach_data, by.x = "R_fighter", by.y="fighter_name")
+dif_KO = dif_KO %>% filter(win_by == "KO/TKO")
+dif_KO$dif = dif_KO$Reach.x - dif_KO$Reach.y
+  
+dif_else1 = merge(win_data, fighter_reach_data, by.x = "B_fighter", by.y="fighter_name")
+dif_else = merge(dif_else1, fighter_reach_data, by.x = "R_fighter", by.y="fighter_name")
+dif_else = dif_else %>% filter(win_by != "KO/TKO")
+dif_else$dif = dif_else$Reach.x - dif_else$Reach.y
+```
+
+```{r}
+mean_KO <- mean(dif_KO$dif)
+mean_else <- mean(dif_else$dif)
+cat("Srednja vrijednost razlike raspona ruku ako borba nije završila nokautom na temelju uzorka:", mean_else)
+cat("\n")
+cat("Srednja vrijednost razlike raspona ruku ako je borba završila nokautom na temelju uzorka:",mean_KO)
+```
+Da bi smo mogli koristiti t-test kako bi analizirali razliku u srednjim vrijednostima naše dvije skupine prvo moramo provjeriti jesu li normalno distribuirane i je li F test zadovoljava jednakost o varijancama. Kako smo pokazali da je raspon ruku normalno distribuiran onda i razlika dvije vrijednosti te distribucije podliježe isto normalnoj distribuciji.
+
+To se i vidi na histogramima u nastavku.
+```{r}
+h = hist(dif_KO$dif,
+         main="Histogram razlike duljina ruku",
+         xlab="razlika u duljini uz uvjet zavrsetka nokautom (in)",
+         ylab="Frekvencija",
+         col="lightgreen")
+h = hist(dif_else$dif,
+         main="Histogram razlike duljina ruku",
+         xlab="razlika u duljini uz uvjet zavrsetka bez nokauta (in)",
+         ylab="Frekvencija",
+         col="lightgreen")
+
+```
+
+Sada postavljamo hipoteze o jednakosti varijanci za provođenje F-testa.
+  H0 - varijance su jednake
+  H1 - varijance nisu jednake
+
+Provodimo test o jednakosti varijance kako bi znali koju vrstu t testa koristiti i na temelju dobivenih podataka zaključujemo da na razini značajnosti od 5% ne možemo odbaciti hipotezu da su varijance ova dva skupa jednake. 
+```{r}
+var.test(dif_KO$dif, dif_else$dif)
+```
+
+Sada možemo provesti t-test. Formiramo hipoteze.
+  H0 - nema razlike u srednjim vrijednostima
+  H1 - postoji razlika u srednjim vrijednostima
+
+```{r}
+t.test(dif_KO$dif, dif_else$dif,var.equal=TRUE)
+```
+Vidimo da je p vrijednost veća od 5% što znači da ovaj slučaj nema statističku važnost. Na razini 5% zaključujemo da ne možemo odbaciti hipotezu H0 te ju prihvaćamo da nema razlika u srednjim vrijednostima. Iz toga naknadno zaključujemo da ne možemo očekivati nokaut ovisno o razlici duljina ruku.
+
+
+## Zadatak 2. Razlikuje li se trajanje mečeva (u sekundama) izmedu pojedinih kategorija?
+
+#Razlika trajanja borbi ovisno o kategoriji
+
+U ovom zadatku ćemo tražit postoji li razlika između trajanja borbi u sekundama ovisno o UFC kategoriji koja se natječe...
+
+#1.Učitavanje podataka
+
+```{r}
+total_fight_data_xlsx = suppressWarnings(read_excel("total_fight_data.xlsx"))
+
+df = data.frame(total_fight_data_xlsx)
+
+#total_fight_data = read.csv('total_fight_data.csv',header = T,sep = ";")
+#write.xlsx(total_fight_data, "total_fight.xlsx")
+#df <- read_excel("total_fight.xlsx")
+``` 
+Fight_type stupac je procesiran stupac koji opisuje koje je vrste borba te ćemo iz njega izvući kategoriju borbe
+Ukupnu sumu sekundi meča izvest ćemo zbrajanjem sekundi iz svake runde 
+
+#Sređivanje podataka
+
+```{r}
+#Promotrit ćemo kakvo su strukturirane borbe po rundama
+df$extracted <- str_extract(df$Format, "\\(([^)]+)\\)")
+```
+
+Trajanje runde je uvijek ograničeno s pet minuta...
+
+```{r}
+sum(is.na(df[,"last_round_time"]))
+```
+
+```{r}
+last_round_seconds <- rep(0, nrow(df))
+df <- cbind(df, last_round_seconds)
+
+
+for(index in seq_along(df)){
+time <- strptime(df[index, "last_round_time"], "%M:%S")
+seconds <- time$min * 60 + time$sec
+df[index, "last_round_seconds"] = seconds
+}
+df$last_round_seconds <- as.double(df$last_round_seconds)
+df <- df %>%
+  mutate(seconds_in_fight = (last_round - 1) * 5 * 60 + last_round_seconds)
+
+```
+```{r}
+#update.packages()
+```
+
+Stvorili smo stupac koji opisuje ukupan broj sekundi trajanja borbe
+
+Treba urediti stupac "Fight_type"...
+
+
+```{r}
+#u arr polje stavljamo sve moguće kategorije u UFC koje smo pronašli na internetu 
+
+arr <- c("Strawweight", "Flyweight", "Bantamweight", "Featherweight", "Lightweight", "Welterweight", "Middleweight",
+                          "Light Heavyweight", "Heavyweight")
+
+df$Gender[str_detect(df$Fight_type, "Women's")]  <- "Woman"
+df$Gender[!str_detect(df$Fight_type, "Women's")]  <- "Man"
+
+```
+
+```{r}
+for (category in arr) {
+df$Fight_type[str_detect(df$Fight_type, category)] <- category
+}
+
+df = df %>% filter(!str_detect(Fight_type, "Catch"))
+df = df %>% filter(!str_detect(Fight_type, "Open"))
+df = df %>% filter(!str_detect(Fight_type, "Tournament"))
+df = df %>% filter(!str_detect(Fight_type, "Championship"))
+
+```
+
+#3.Generalna vizualizacija podataka
+```{r}
+par(mar = c(7,4,4,2) + 0.1)
+barplot(table(df$Fight_type[df$Gender=="Man"]),las=2,cex.names=1,main='Fight category appearances in man fights')
+barplot(table(df$Fight_type[df$Gender=="Woman"]),las=2,cex.names=1,main='Fight category appearances in woman fights')
+barplot(table(df$Fight_type),las=2,cex.names=1,main='Fight category appearances in all fights')
+
+```
+
+Puno je manje ženskih borbi te se točno pola od svih mogućih kategorija ne prikazuje...
+
+```{r}
+#Brisanje borbi bez zapisa o vremenu trajanja 
+
+df.man <- filter(df, Gender == "Man")
+df.man <- filter(df.man, seconds_in_fight != 0)
+row_indexes <- complete.cases(df.man[, c("Fight_type", "seconds_in_fight")])
+df.man <- df.man[row_indexes, ]
+
+df.woman <- filter(df, Gender == "Woman")
+df.woman <- filter(df.woman, seconds_in_fight != 0)
+row_indexes <- complete.cases(df.woman[, c("Fight_type", "seconds_in_fight")])
+df.woman <- df.woman[row_indexes, ]
+
+```
+
+```{r}
+plotmeans(seconds_in_fight~Fight_type, data = df.man, las = 2, xlab = '', main = "Average seconds per man fight compared for every category")
+plotmeans(seconds_in_fight~Fight_type, data = df.woman, las = 2, xlab = '', main = "Average seconds per woman fight compared for every category")
+```
+
+```{r}
+
+par(mar = c(6,4,4,2) + 0.1)
+boxplot(seconds_in_fight ~ Fight_type,data=df.man, las = 2, cex.names = 0.5, xlab="", ylab="average seconds per fight", main = "Fight categories (man)")
+
+```
+Ovakav box plot nije priželjkivan, ali ćemo ga ostaviti da prikazuje podatke koje smo dobili. Iz njega možemo isčitati da je median svake grupe 600 te je najčešći slučaj da je borba završena nakon druge runde. 
+
+#4.Provedba testova 
+
+#4.1 Trajanje borbi kod muškaraca ovisno o kategoriji
+
+```{r}
+#Provjera normalnosti zbog pretpostavke
+require(nortest)
+lillie.test(df.man$seconds_in_fight)
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Heavyweight"])
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Bantamweight"])
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Featherweight"])
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Flyweight"])
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Lightweight"])
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Middleweight"])
+lillie.test(df.man$seconds_in_fight[df.man$Fight_type == "Welterweight"])
+
+
+#for (category in unique(df_man_fights$Fight_type)){
+#  lillie.test(df_man_fights$seconds_in_fight[df_man_fights$Fight_type==category])
+#}
+
+for (category in unique(df.man$Fight_type)){
+  hist(df.man$seconds_in_fight[df.man$Fight_type==category], main = paste("Histogram of" , category), xlab = "Average seconds per fight"
+)
+}
+
+```
+```{r}
+#Provjera homogenosti varijance zbog pretpostavke
+bartlett.test(df.man$seconds_in_fight ~ df.man$Fight_type)
+
+var((df.man$seconds_in_fight[df.man$Fight_type=='Heavyweight']))
+```
+
+Ne mozemo provest ANOVA test jer nam kategorije nemaju normalnu distribuciju niti homogenost varijance (p-value testova je izrazito manji od 0.05).
+Provjerom normalnosti koja odbacuje samu normalnost zaključujemo da moramo korisit ne parametarske testove. 
+Koristit cemo Kruskal-Wallisov test.
+
+Unatoč neuspješnom dokazivanju normalnosti provest ćemo ANOVA test kako bismo razmotrili rezultat.
+```{r}
+anova = aov(seconds_in_fight~Fight_type, data = df.man)
+summary(anova)
+```
+
+```{r}
+kruskal.test(df.man$seconds_in_fight, df.man$Fight_type)
+```
+#4.2 Trajanje borbi kod žena ovisno o kategoriji
+
+Featherweight borbi kod žena ima samo 9 pa ćemo njih isključit iz analize.
+
+```{r}
+df.woman <- filter(df.woman, Fight_type != "Featherweight")
+lillie.test(df.woman$seconds_in_fight[df.woman$Fight_type == "Strawweight"])
+lillie.test(df.woman$seconds_in_fight[df.woman$Fight_type == "Bantamweight"])
+lillie.test(df.woman$seconds_in_fight[df.woman$Fight_type == "Flyweight"])
+```
+
+Distribucija kao i kod muškaraca nije normalna te koristimo ne parametarski test.
+
+```{r}
+kruskal.test(df.woman$seconds_in_fight, df.woman$Fight_type)
+```
+`Test pokazuje da nulta hipoteza da je razlika u trajanju borbi ovisno o kategoriji jednaka te ju ne možemo odbaciti (p-value >> 0.05).
+
+#5.Dodatna provedba testa i zaključak
+Promatranjem podataka zaključuje se da se borbe dijele na one koje traju 3 runde,jedne koje traju 5 rundi te još par vrsti koje imaju kombinaciju u strukturi samih rundi npr. "1 Rnd + 2OT (15-3-3)" "1 Rnd (12)". Taj faktor nam može biti utjecajan pri provedbi testa te ispitivanja distribucije tako da ćemo dodatno promatrati samo one borbe koje traju 3 runde. 
+
+```{r}
+df.additional <- filter(df.man, Format == "3 Rnd (5-5-5)")
+lillie.test(df.additional$seconds_in_fight)
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Heavyweight"])
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Bantamweight"])
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Featherweight"])
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Flyweight"])
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Lightweight"])
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Middleweight"])
+lillie.test(df.additional$seconds_in_fight[df.additional$Fight_type == "Welterweight"])
+```
+
+```{r}
+kruskal.test(df.additional$seconds_in_fight, df.additional$Fight_type)
+```
+
+Ne parametarski test nam govori da postoji razlika u trajanju borbi između kategorija. 
+```{r}
+plotmeans(seconds_in_fight~Fight_type, data = df.additional, las = 2, xlab = '', main = "Average seconds per man 3-round fight compared for every category")
+
+```
+```{r}
+df.additional <- filter(df.additional, Fight_type != "Featherweight")
+df.additional <- filter(df.additional, Fight_type != "Flyweight")
+df.additional <- filter(df.additional, Fight_type != "Heavyweight")
+```
+
+```{r}
+kruskal.test(df.additional$seconds_in_fight, df.additional$Fight_type)
+```
+Kada izbacimo kategorije koje nam 'iskaču' na grafu te usporedimo četiri kategorije (Bantamweight, Lightweight, Middleweight i Welterweight) i provedemo Kruskal-Wallisov test dobivamo p-vrijednost veću od 0.05 te dokazujemo da su nam razlike trajanja u sekundama približno jednake. Iz grafa vidimo da Featherweight i Flyweight kod muškaraca traju duže dok Heavyweight borbe traju najkraće.
+
+## Zadatak 3. Traju li (u rundama) borbe za titulu duže od ostalih borbi u natjecanju?
+
+Moderni UFC razlikuje dva formata borbi: 3-Rnd (5-5-5) format od tri runde koji se koristi za obične borbe te 5-Rnd (5-5-5-5-5) format od 5 rundi koji se koristi za borbe za titulu. Naravno, bilo je situacija kada se 5-Rnd format koristio za obične borbe npr. UFC 202 borba Conor McGregora i Nate Diaza. Činjenica da borbe za titulu imaju prostora trajati dulje zbog formata nas motivira ispitati je li to istina. S jedne strane moramo biti svjesni činjenice da možda nećemo dobiti realnu sliku odnosa trajanja borbi jer su se mnoge 3-Rnd borbe koje su završile na odluku vjerojatno mogle produljiti. Iz tog razloga prvo ćemo usporediti trajanja u rundama neovisno o formatu, a zatim ćemo uspoređivati isključivo 5-Rnd borbe za titulu i 5-Rnd obične borbe jer ih ima podjednako.
+
+Učitavamo podatke za sve borbe. Potom iz tih podataka stvaramo dva nova okvira od kojih jedan sadrži podatke za sve borbe za titulu, a drugi sadrži podatke za borbe koje nisu za titulu.
+
+```{r}
+fight_data_task3 = suppressWarnings(read_excel("total_fight_data.xlsx"))
+
+dfcopy_fight_data_task3 = data.frame(fight_data_task3);
+dfcopy_fight_data_task3 <- subset(dfcopy_fight_data_task3, select = c(R_fighter, B_fighter, last_round, Format, Fight_type))
+
+# izdvajamo veliki dataset u dva manja radi lakšeg snalaženja
+df_task3_titleFights = dfcopy_fight_data_task3 %>% filter(str_detect(Fight_type, "Title"))
+df_task3_nonTitleFights = dfcopy_fight_data_task3 %>% filter(!str_detect(Fight_type, "Title"))
+
+dfcopy_fight_data_task3$Fight_type[str_detect(dfcopy_fight_data_task3$Fight_type, "Title")] <- "Title Bout"
+dfcopy_fight_data_task3$Fight_type[!str_detect(dfcopy_fight_data_task3$Fight_type, "Title")] <- "Normal Bout"
+```
+
+Vidimo da borbi za titulu ima značajno manje nego običnih borbi.
+
+```{r}
+print(paste("Broj normalnih non-title borbi je: ", nrow(df_task3_nonTitleFights)))
+print(paste("Broj borbi za titulu je: ", nrow(df_task3_titleFights)))
+```
+
+Cilj nam je provjeriti traju li borbe za titulu duže od ostalih borbi u natjecanju. Za navedeno istraživanje postavljamo kontingencijsku tablicu koja za stupce ima kategorijsku varijablu "Title bout" tj. "Bout". 
+
+Provjerimo prije svega koje formate borbi imamo u našem datasetu.
+
+```{r}
+table(df_task3_nonTitleFights$Format)
+cat("\n")
+table(df_task3_titleFights$Format)
+```
+Uočavamo da postoji dosta formata s izrazito malo održanih borbi. To su prastari formati koji se više ne koriste npr. 1 Rnd (12) format koji je korišten za samo 4 obične borbe. Takvi formati mogli bi utjecati na naše rezultate s obzirom da su limitirani na trajanje od samo jedne runde, a ona je trajala npr. 10 ili 20 minuta. Takve borbe mogle bi nam dati krivu sliku jer imaju određenu težinu u ovakvom istraživanju. Dodatna motivacija za eliminaciju borbi s prastarim formatima je ta što želimo da ovo istraživanje bude primjenjivo za budućnost UFC-a koji danas koristi isključivo 5-Rnd i 3-Rnd format. Imamo sreću što nećemo eliminirati veliki broj podataka. 
+Potaknuti ovim zaključcima, modificiramo okvire da sadrže samo 3-Rnd i 5-Rnd formate koje ćemo potom uspoređivati.
+
+```{r}
+dfcopy_fight_data_task3['Format'] <- sapply(dfcopy_fight_data_task3['Format'], as.character);
+
+dfcopy_fight_data_task3 = dfcopy_fight_data_task3 %>% filter(grepl("5 Rnd (5-5-5-5-5)", Format, fixed = TRUE) | grepl("3 Rnd (5-5-5)", Format, fixed = TRUE))
+```
+
+Naši podaci su sada smanjeni s 6012 redaka na 5796, maknuli smo samo 3.5% podataka.
+
+Pogledajmo sada koja sve trajanja natjecanja (u rundama) imamo za obje kategorije borbi.
+
+```{r}
+levels(factor(df_task3_titleFights$last_round))
+levels(factor(df_task3_nonTitleFights$last_round))
+
+```
+Vidimo da su u oba dataseta prisutna identična trajanja koja će u našem slučaju odgovarati redcima kontingencijske tablice. Kako bi si olakšali rad s podacima, pretvaramo podatke "last_round" u character format.
+
+```{r}
+df_task3_titleFights['last_round'] <- sapply(df_task3_titleFights['last_round'], as.character)
+df_task3_nonTitleFights['last_round'] <- sapply(df_task3_nonTitleFights['last_round'], as.character)
+
+dfcopy_fight_data_task3['last_round'] <- sapply(dfcopy_fight_data_task3['last_round'], as.character)
+```
+
+Kreiramo kontingencijsku tablicu na temelju podataka.
+
+```{r}
+tbl = table(dfcopy_fight_data_task3[dfcopy_fight_data_task3$last_round == "1" |  
+                                    dfcopy_fight_data_task3$last_round == "2" | 
+                                    dfcopy_fight_data_task3$last_round == "3" | 
+                                    dfcopy_fight_data_task3$last_round == "4" | 
+                                    dfcopy_fight_data_task3$last_round == "5",]$last_round,
+            
+            dfcopy_fight_data_task3[dfcopy_fight_data_task3$last_round == "1" | 
+                                    dfcopy_fight_data_task3$last_round == "2" | 
+                                    dfcopy_fight_data_task3$last_round == "3" |
+                                    dfcopy_fight_data_task3$last_round == "4" | 
+                                    dfcopy_fight_data_task3$last_round == "5",]$Fight_type)
+tbl
+```
+Dobra praksa je vizualizirati kategorijske podatke. Jedan on načina je da prikažemo odnose trajanja pomoću bar plota.
+
+```{r}
+counts1 <- dfcopy_fight_data_task3 %>% filter(Fight_type == "Normal Bout") %>% count(last_round)
+counts2 <- dfcopy_fight_data_task3 %>% filter(Fight_type == "Title Bout") %>% count(last_round)
+
+counts1$pct <- counts1$n / sum(counts1$n) * 100
+counts2$pct <- counts2$n / sum(counts2$n) * 100
+par(mfrow=c(1, 2))
+
+barplot(counts1$pct,
+        names.arg=counts1$last_round,
+        col="blue",
+        main="Normal bouts",
+        xlab="Last round",
+        ylab="Frequency (%)",
+        #legend=unique(counts$Fight_type)
+        )
+
+barplot(counts2$pct,
+        names.arg=counts2$last_round,
+        col="red",
+        main="Title bouts",
+        xlab="Last round",
+        ylab="Frequency (%)",
+        #legend=unique(counts$Fight_type)
+        )
+```
+Na prvi pogled uočavamo da je u normalnim borbama najčešći slučaj da borba traje 3 runde. U slučajevima borbe za titulu najviše borbi završi u petoj rundi.
+
+Tablici na kraju dodajemo margine.
+
+```{r}
+tbl_margins = addmargins(tbl)
+tbl_margins
+```
+Test nezavisnosti $\chi^2$ test u programskom paketu R implementiran je u funkciji `chisq.test()` koja kao ulaz prima kontingencijsku tablicu podataka koje testiramo na nezavisnost. Ispitujemo nezavisnost trajanja borbe (u rundama) o vrsti borbe.
+
+Pretpostavka testa je da očekivana frekvencija pojedinog razreda mora biti veća ili jednaka 5 (`chisq.test()` pretpostavlja da je ovaj uvjet zadovoljen stoga je prije provođenja testa potrebno to provjeriti).
+
+```{r}
+for (col_names in colnames(tbl_margins)){
+  for (row_names in rownames(tbl_margins)){
+    if (!(row_names == 'Sum' | col_names == 'Sum') ){
+      cat('Očekivane frekvencije za razred ',col_names,'-',row_names,': ',(tbl_margins[row_names,'Sum'] * tbl_margins['Sum',col_names]) / tbl_margins['Sum','Sum'],'\n')
+    }
+  }
+}
+```
+Uočavamo da nažalost pretpostavka testa nije ispunjena. Za slučaj "Title bout - 4" uočavamo da je očekivana frekvencija 1.799172 što je manje od 5. U ovakvoj situaciji ne možemo primjeniti $\chi^2$ test nezavisnosti, ali nude nam se dva rješenja.
+
+1. rješenje - Možemo spajati dvije kategorije, u ovom slučaju pametan odabir bi bio spojiti borbe koje traju 4 i 5 rundi u jedno trajanje zvano "4-5". Motivacija za takvo spajanje je činjenica da su formati borbe ili 3-round ili 5-round, stoga ako je borba trajala dulje od 3 runde, spada u format 5 round.
+
+2. rješenje - Možemo umjesto $\chi^2$ testa nezavisnosti koristiti Fisherov egzaktni test, koji je neparametarski i služi istoj svrsi kao i $\chi^2$ test nezavisnosti.
+
+Prvo ćemo pokazati rješenje pod 1.
+Moramo prvo modificirati vrijednosti gdje borbe traju 4 ili 5 rundi u "4-5"
+
+```{r}
+dfCombined_fight_data_task3 = data.frame(dfcopy_fight_data_task3)
+
+dfCombined_fight_data_task3$last_round[str_detect(dfCombined_fight_data_task3$last_round, "4") | str_detect(dfCombined_fight_data_task3$last_round, "5")] <- "4-5"
+```
+
+Ponovo stvaramo tablicu.
+
+```{r}
+tbl_combined = table(dfCombined_fight_data_task3[dfCombined_fight_data_task3$last_round == "1" |  
+                                    dfCombined_fight_data_task3$last_round == "2" | 
+                                    dfCombined_fight_data_task3$last_round == "3" | 
+                                    dfCombined_fight_data_task3$last_round == "4-5",]$last_round,
+            
+            dfCombined_fight_data_task3[dfCombined_fight_data_task3$last_round == "1" | 
+                                    dfCombined_fight_data_task3$last_round == "2" | 
+                                    dfCombined_fight_data_task3$last_round == "3" |
+                                    dfCombined_fight_data_task3$last_round == "4-5",]$Fight_type)
+
+tbl_combined_margins = addmargins(tbl_combined)
+tbl_combined_margins
+```
+Ponavljamo provjeru pretpostavke testa.
+
+```{r}
+for (col_names in colnames(tbl_combined_margins)){
+  for (row_names in rownames(tbl_combined_margins)){
+    if (!(row_names == 'Sum' | col_names == 'Sum') ){
+      cat('Očekivane frekvencije za razred ',col_names,'-',row_names,': ',(tbl_combined_margins[row_names,'Sum'] * tbl_combined_margins['Sum',col_names]) / tbl_combined_margins['Sum','Sum'],'\n')
+    }
+  }
+}
+```
+Sve su frekvencije veće od 5 pa konačno možemo provesti test.
+Formirajmo sada hipoteze:
+  H0 - trajanja borbe (u rundama) su jednaka za obje vrste borbi
+  H1 - trajanja borbe (u rundama) nisu jednaka za obje vrste borbi
+
+```{r}
+chisq.test(tbl_combined,correct=F)
+```
+Odbacujemo pretpostavku H0 - "trajanja borbe (u rundama) su jednaka za obje vrste borbi" u svrhu H1 - "trajanja borbe (u rundama) nisu jednaka za obje vrste borbi".
+##
+Drugo rješenje je korištenje Fisherovog egzaktnog testa, te koristimo tbl koji smo ranije definirali.
+
+```{r}
+fisher.test(tbl, simulate.p.value=TRUE)
+```
+Odbacujemo pretpostavku H0 - "trajanja borbe (u rundama) su nezavisna o vrsti borbe" u svrhu H1 - "trajanja borbe (u rundama) su zavisna o vrsti borbe".
+
+Ponovimo sada statističko istraživanje tako da uspoređujemo isključivo 5-Rnd borbe u obje kategorije borbi.
+
+Format "5 Rnd (5-5-5-5-5)" je popularan u borbama za titulu (279 borbi), a dovoljno popularan u normalnim borbama (228 borbi). S obzirom da je broj borbi tog formata za obje kategorije velik i ne previše različit, filtrirat ćemo podatke koje imamo i ponoviti istraživanje samo nad borbama formata "5 Rnd (5-5-5-5-5)".
+
+```{r}
+df5rndFormat_fight_data_task3 = data.frame(dfcopy_fight_data_task3)
+df5rndFormat_fight_data_task3['Format'] <- sapply(df5rndFormat_fight_data_task3['Format'], as.character);
+
+df5rndFormat_fight_data_task3 = df5rndFormat_fight_data_task3 %>% filter(grepl("5 Rnd (5-5-5-5-5)", Format, fixed = TRUE))
+```
+
+Kreiramo tablicu za borbe formata "5 Rnd (5-5-5-5-5)".
+
+```{r}
+tbl_5rnd = table(df5rndFormat_fight_data_task3[df5rndFormat_fight_data_task3$last_round == "1" |  
+                                               df5rndFormat_fight_data_task3$last_round == "2" | 
+                                               df5rndFormat_fight_data_task3$last_round == "3" | 
+                                               df5rndFormat_fight_data_task3$last_round == "4" |
+                                               df5rndFormat_fight_data_task3$last_round == "5",]$last_round,
+            
+            df5rndFormat_fight_data_task3[df5rndFormat_fight_data_task3$last_round == "1" | 
+                                          df5rndFormat_fight_data_task3$last_round == "2" | 
+                                          df5rndFormat_fight_data_task3$last_round == "3" |
+                                          df5rndFormat_fight_data_task3$last_round == "4" |
+                                          df5rndFormat_fight_data_task3$last_round == "5",]$Fight_type)
+tbl_5rnd_margins = addmargins(tbl_5rnd)
+tbl_5rnd_margins
+```
+Provjeravamo očekivane frekvencije.
+
+```{r}
+for (col_names in colnames(tbl_5rnd_margins)){
+  for (row_names in rownames(tbl_5rnd_margins)){
+    if (!(row_names == 'Sum' | col_names == 'Sum') ){
+      cat('Očekivane frekvencije za razred ',col_names,'-',row_names,': ',(tbl_5rnd_margins[row_names,'Sum'] * tbl_5rnd_margins['Sum',col_names]) / tbl_5rnd_margins['Sum','Sum'],'\n')
+    }
+  }
+}
+```
+Pretpostavka testa je ispunjena pa ga provodimo.
+
+```{r}
+chisq.test(tbl_5rnd, correct=F)
+```
+Zanimljivo, ovakvo istraživanje nam je dalo drugačiji zaključak. Ne možemo odbaciti hipotezu H0 - "trajanja borbe (u rundama) su jednaka za obje vrste borbi" te ju prihvaćamo s obzirom na p-vrijednost i vrijednost statistike manje od kritične vrijednosti. Mogli smo pretpostaviti da ćemo doći do ovakvog zaključka gledajući kontingencijsku tablicu za "5 Rnd" format borbe jer je za isto trajanje borbe u obje kategorije podjednak broj opaženih borbi.
+
+## Zadatak 4. Mogu li dostupne značajke predvidjeti pobjednika??
+
+Zadatak je odrediti može li se predvidjeti pobjednik UFC borbe pomoću dostupnih značajki.To ćemo napraviti pomoću modela logističke regresije. Za regresore ćemo samo koristiti značajke dostupne prije borbe, npr: tip borbe, težine borca, postotak obaranja u borbama borca itd. a nećemo koristiti značajke dobivene tijekom borbe: značajni udarci itd. Napraviti ćemo nekoliko modela, svaki sa različitim pristupom, a svaki pristup ćemo objasniti prije stvaranja modela. Idemo prvo urediti naš dataset.
+Prvo učitavamo podatke o svim borbama koje imamo:
+
+Iz te tablice uzimamo samo 4 stupca: B_Fighter, R_Fighter, Fight_type i Winner. Ostale značajke su dobivene tijekom borbe ili ne bi smjele utjecati na pobjednika(datum, lokacija..). Ako je pobjednik crveni, Winner mijenjamo u 0, a ako je plavi u 1. Stupci Winner i Fight_Type ćemo transformirati u tip varijable faktor
+```{r}
+
+suppressWarnings({
+  fightdata=read_excel("total_fight_data.xlsx")
+})
+fightdata <- filter(fightdata, !is.na(Winner) & !is.na(R_fighter) & !is.na(B_fighter) ) #izbriši redove gdje je NA
+fightdataprocessed=select(fightdata,R_fighter,B_fighter,Fight_type,Winner)
+fightdataprocessed$Winner=factor(ifelse(fightdataprocessed$Winner == fightdataprocessed$R_fighter, 0, 1))#crveni u 0 plavi u 1
+fightdataprocessed$Winner=factor(fightdataprocessed$Winner)
+fightdataprocessed$Fight_type=factor(fightdataprocessed$Fight_type)
+summary(fightdataprocessed)
+```
+Koristiti ćemo nekoliko različitih modela, koje ćemo pri kraju usporediti.
+
+Sad ćemo izvaditi podatke o borcima , te odmah urediti(postotke iz stringa u decimalne brojeve, visinu,težinu i doseg u brojeve itd.,Stance u faktor tip varijable)
+
+```{r}
+fightersdata=read.csv("fighter_details.csv")
+
+fightersdata=select(fightersdata,-DOB)#mičemo datum rođenja
+
+fightersdata <- filter(fightersdata,  nchar(as.character(fightersdata$Reach)) > 0) #makni redove gdje nema Reach
+
+fightersdata <- filter(fightersdata,  nchar(as.character(fightersdata$Height)) > 0) #makni redove gdje je Height 0
+
+fightersdata <- filter(fightersdata,  nchar(as.character(fightersdata$Stance)) > 0) #nmakni redove gdje nema Stance
+
+fightersdata$Str_Acc=parse_number(fightersdata$Str_Acc)/100 #pretvori postotke u decimale
+
+fightersdata$Str_Def=parse_number(fightersdata$Str_Def)/100
+
+fightersdata$Weight=parse_number(fightersdata$Weight)
+
+fightersdata$Reach=parse_number(fightersdata$Reach)
+
+fightersdata$TD_Acc=parse_number(fightersdata$TD_Acc)/100
+
+fightersdata$TD_Def=parse_number(fightersdata$TD_Def)/100
+
+# kod pronađen na internetu, za konverziju visine iz incha u centimetre
+# Split height column into feet and inches columns
+fightersdata <- fightersdata %>%
+  mutate(feet = str_split(Height, " ") %>% map_chr(1),
+         inches = str_split(Height, ' ') %>% map_chr(2))
+
+fightersdata$feet=parse_number(fightersdata$feet)
+fightersdata$inches=parse_number(fightersdata$inches)
+
+# Convert feet to inches and add to inches column
+fightersdata$total_inches <- fightersdata$feet * 12 + fightersdata$inches
+
+# Convert total inches to centimeters
+fightersdata$height_cm <- fightersdata$total_inches * 2.54
+
+# Remove unnecessary columns
+fightersdata <- fightersdata %>%
+  select(-feet, -inches, -total_inches, -Height)
+
+fightersdata$Stance=factor(fightersdata$Stance)
+summary(fightersdata)
+```
+Vrijeme je za izradu prvog modela logističke regresije. Tablicu s podacima za model ćemo dobiti tako što spojimo fighterdata sa fightdataprocessed pomoću funkcije merge, prvo spajajući po crvenom kutu, zatim plavom, te za oba borca i u plavom i u crvenom kutu gledamo pojedinačno njihove značajke, svaku kao stupac. X varijabla će predstavljati crveni kut, dok će y varijabla predstavljati plavi kut. Ovaj model će koristiti sve moguće značajke pri predviđanju(osim imena)
+```{r}
+privremena1=merge(fightdataprocessed,fightersdata,by.x="R_fighter",by.y="fighter_name")
+final_data1=merge(privremena1,fightersdata,by.x="B_fighter",by.y="fighter_name")
+
+summary(final_data1)
+```
+Vrijeme je za regresiju, jedino ćemo prije nje za faktorske varijable Stance.x i Stance.y, odlučiti da je referentni level Stance Orthodox, pošto je najfrekventniji, jer bi model trebao bit precizniji ako za faktorsku varijablu odaberemo referentni level koji je najfrekventniji.
+
+
+```{r,results='hide'}
+final_data1$Stance.x = relevel(final_data1$Stance.x, ref = "Orthodox")
+final_data1$Stance.y = relevel(final_data1$Stance.y, ref = "Orthodox")
+logreg.mdl1 = glm(Winner ~Fight_type + Weight.x + Reach.x +Stance.x+ SLpM.x+Str_Acc.x + SApM.x + Str_Def.x + TD_Avg.x + TD_Acc.x + TD_Def.x + Sub_Avg.x+ height_cm.x + Weight.y + Reach.y +Stance.y+ SLpM.y+Str_Acc.y + SApM.y + Str_Def.y + TD_Avg.y + TD_Acc.y + TD_Def.y + Sub_Avg.y+ height_cm.y, data = final_data1, family = binomial())
+summary(logreg.mdl1)
+#output ovog summary ne izbacujemo u pdf jer zauzima 10+ stranica
+```
+
+
+```{r}
+Rsq1 = 1 - logreg.mdl1$deviance/logreg.mdl1$null.deviance
+cat("Rsq1: ",Rsq1)
+```
+Možemo primijetiti da su neki regresori znatno bitniji od drugih, napravimo graf gdje ćemo vidjeti razliku između pojedinih regresora i utjecaj na pobjednika
+```{r}
+ggplot(data = final_data1, aes(x = SApM.x-SApM.y, y = Winner, color = Winner)) +
+  geom_point() +
+  labs(x = "Difference in Strikes Acccumulated Per Minute", y = "Winner")
+```
+Kada je razlika broja primljenih udaraca po minuti(regresor s značajnom p vrijednosti za oba borca) negativan, znači da je plavi borac primio više udaraca, i vidimo na grafu da onda imamo više crvenih pobjednika, dok  pozitivna razlika znači da je crveni primio više udaraca, te imamo više plavih pobjednika.
+
+Usporedimo to s visinom, regresorom koji nema značajnu p vrijednost
+```{r}
+ggplot(data = final_data1, aes(x = height_cm.x-height_cm.y, y = Winner, color = Winner)) +
+  geom_point() +
+  labs(x = "Difference in height", y = "Winner")
+```
+Vidimo da nema neke razlike u broju pobjednika.
+
+Gledajući grafove, možemo zaključiti da neki regresori nisu značajni. Preko funkcije step s parametrom backward ćemo sada napraviti reducirani model sa značajnijim regresorima
+```{r}
+logreg.mdl2=step(logreg.mdl1,direction = "backward",trace=0)
+summary(logreg.mdl2)
+Rsq2 = 1 - logreg.mdl2$deviance/logreg.mdl2$null.deviance
+cat("Rsq2: ",Rsq2)
+```
+
+Dobijamo model s većom rezidualnom devijancom nego naš početni model. Provesti ćemo Likelihood Ratio Test, i ako se ispostavi da se rezidualna devijanca nije previše povećala(provjeravamo preko p vrijednosti), uzet ćemo reducirani model kao bolji
+```{r}
+anova(logreg.mdl1, logreg.mdl2, test = "LRT")
+```
+
+No, provedbom LRT vidimo da se rezidualna devijanca povećala, i to na razini značajnosti manjoj od 0.05, pa ne možemo koristiti reducirani model umjesto opširnog. Tu smo probali i neke druge modele, gdje bi micali samo jedan ili 2 regresora, no ni oni nisu zadovoljili na LRT, pa ih nismo ostavili u projektu.
+
+Provjerimo sada koliko je model uspješan u predviđanju. Koristićemo "matricu zabune".
+Njezini parametri:
+- accuracy: $\dfrac{TP+TN}{TP+FP+TN+FN}$
+- precision: $\dfrac{TP}{TP+FP}$
+- recall: $\dfrac{TP}{TP+FN}$
+- specificity: $\dfrac{TN}{TN+FP}$
+
+Što su parametri veći, model uspješnije predviđa
+```{r}
+yHat <- logreg.mdl1$fitted.values >= 0.5
+tab <- table(final_data1$Winner, yHat)
+
+tab
+
+
+accuracy1 = sum(diag(tab)) / sum(tab)
+precision1 = tab[2,2] / sum(tab[,2])
+recall1 = tab[2,2] / sum(tab[2,])
+specificity1 = tab[1,1] / sum(tab[,1])
+
+cat("Accuracy: ",accuracy1,"\n") 
+cat("Precision: ",precision1,"\n")
+cat("Recall: ",recall1,"\n")
+cat("Specificity: ",specificity1,"\n")
+```
+Od naših borbi u datasetu, oko 3001 je pobjedio crveni, a 1793 je pobijedio plavi. Naš model od 3071 pobjede crvenog njih oko 2670(oko 2670) zato jer ponovnim pokretanjem bilježnice se dobivaju blago promijenjenje vrijednosti) klasificira točno, dok od 1793 pobjede plavih samo oko 680 klasificira kao pobjedu plavih. To je vidljivo i u niskoj vrijednosti recall varijabli.
+```{r}
+barplot(table(final_data1$Winner),
+        col = c("red","blue"),
+        main = "Winner, 0 = Red, 1 = Blue",
+        xlab = "Winner of the fight in dataset",
+        ylab = "Count")
+
+```
+Tu se može doći do zanimljive pretpostavke, a to je da naš model u većini slučajeva samo pretpostavi da je crveni pobjednik, tj. da ima "bias" prema crvenom. S obzirom da je praksa UFC da stavlja svoje favorite u  crveni kut, ovu pretpostavku treba provjeriti. Kako to testirati, i kako poboljšati model ako je to istina. Naša je ideja bila da prođemo kroz cijeli dataset, i onda za svaku slučajnu borbu zamijenimo kuteve boraca, i njihovu statistiku. Npr, ako pomoću random funkcije odlučimo da se mijenjanju, B_Fighter postaje R_Fighter, te sve varijable koje su imale .y na kraju postaju .x. Provedimo to.
+```{r}
+fightdataprocessed2=fightdataprocessed
+for(i in 1:nrow(fightdataprocessed2)){
+  random_number <- sample(0:1,1)
+  if(random_number==1){
+    row=fightdataprocessed2[i,]
+    storage=row$R_fighter
+    row$R_fighter=row$B_fighter
+    row$B_fighter=storage
+    row$Winner=factor(ifelse(row$Winner==0,1,0))
+    fightdataprocessed2[i,]=row
+  }
+  
+}
+summary(fightdataprocessed2)
+```
+
+
+
+```{r}
+privremena2=merge(fightdataprocessed2,fightersdata,by.x="R_fighter",by.y="fighter_name")
+final_data3=merge(privremena2,fightersdata,by.x="B_fighter",by.y="fighter_name")
+
+
+summary(final_data3)
+```
+
+```{r}
+barplot(table(final_data3$Winner),
+        col = c("red","blue"),
+        main = "Winner, 0 = Red, 1 = Blue",
+        xlab = "Winner of the fight in dataset",
+        ylab = "Count")
+```
+
+Primjećujemo da sada imamo podjednak broj pobjednika u plavom i crvenom kutu. Idemo sada napraviti model logističke regresije.
+```{r,results='hide'}
+final_data3$Stance.x = relevel(final_data3$Stance.x, ref = "Orthodox")
+final_data3$Stance.y = relevel(final_data3$Stance.y, ref = "Orthodox")
+logreg.mdl5 = glm(Winner ~Fight_type + Weight.x + Reach.x +Stance.x+ SLpM.x+Str_Acc.x + SApM.x + Str_Def.x + TD_Avg.x + TD_Acc.x + TD_Def.x + Sub_Avg.x+ height_cm.x + Weight.y + Reach.y +Stance.y+ SLpM.y+Str_Acc.y + SApM.y + Str_Def.y + TD_Avg.y + TD_Acc.y + TD_Def.y + Sub_Avg.y+ height_cm.y, data = final_data3, family = binomial())
+summary(logreg.mdl5)
+#output ovog summary ne izbacujemo u pdf jer zauzima 10+ stranica
+```
+
+
+```{r}
+Rsq5 = 1 - logreg.mdl5$deviance/logreg.mdl5$null.deviance
+cat("Rsq5: ",Rsq5)
+```
+Primjećujemo da ovakav model ima lošije parametre od početnog, kao npr. AIC, Residual deviance, Rsq, no moramo uzeti u obzir da je i dataset drukčiji, te da nema "biasa" prema crvenom.
+
+Provjerimo je li ovim pristupom reducirani model moguć.
+```{r}
+logreg.mdl6=step(logreg.mdl5,direction = "backward",trace=0)
+summary(logreg.mdl6)
+Rsq6 = 1 - logreg.mdl6$deviance/logreg.mdl6$null.deviance
+Rsq6
+```
+Reducirani model ima manji AIC, no ima manji Rsq i veću rezidualnu devijancu. Provedimo LRT da vidimo možemo li ga zadržati.
+```{r}
+anova(logreg.mdl5, logreg.mdl6, test = "LRT")
+```
+Vidimo da ako koristimo razinu značajnosti 0.05, možemo koristiti reducirani model.
+Provjerimo sada kakav je naš model u predviđanju
+```{r}
+yHat <- logreg.mdl6$fitted.values >= 0.5
+tab <- table(final_data3$Winner, yHat)
+
+tab
+
+
+accuracy6 = sum(diag(tab)) / sum(tab)
+precision6 = tab[2,2] / sum(tab[,2])
+recall6 = tab[2,2] / sum(tab[2,])
+specificity6 = tab[1,1] / sum(tab[,1])
+
+cat("Accuracy: ",accuracy6,"\n") 
+cat("Precision: ",precision6,"\n")
+cat("Recall: ",recall6,"\n")
+cat("Specificity: ",specificity6,"\n")
+```
+```{r}
+ggplot(data = final_data3, aes(x = SApM.x-SApM.y, y = Winner, color = Winner)) +
+  geom_point() +
+  labs(x = "Difference in Strikes Acccumulated Per Minute, New Model", y = "Winner")
+```
+PRIMJER ZNAČAJNOG REGRESORA
+
+Primjećujemo da sada podjednako dobro pogađa i za crvene i za plave kada je tko pobijedio. Reccall je dosta bolji za ovakav model, dok su ostali parametri slični kao prije. Za pogađanje pobjednika mi bi koristili model koji ne zna tko je u kojem kutu, jer ima puno bolji recall.
+
+Sada dolazimo do glavnog pitanja, možemo li pomoću ovakvog modela i dostupnih značajki pogoditi pobjednika UFC borbe?
+Mi ne bi rekli da možemo pogoditi sa 100% sigurnošću (a ne bi ni model, naprotiv, on kaže 64.47%), jer UFC borba je puno više od same statistike i nama dostupnih značajki, no, ovaj model nam može dati čvrstog favorita što je bolje od pogađanja.
+
+
+## Bonus zadatak 5. - Postoji li veza između postotka obranjenih udaraca u karijeri borca (Str_Def) i značajnih primljenih udaraca po minuti u karijeri borca (SApM)?
+
+Zanima nas možemo li ustanoviti da borci s velikim Strike Defensom često imaju manji broj primljenih udaraca po minuti u karijeri. Za ispitivanje ovog zadatka koristit ćemo model linearne regresije s kojim ćemo pokušati vidjeti je li Str_Def značajan u predviđanju SApM. 
+
+Za početak učitavamo podatke i formatiramo dataframe da sadrži stupce imena borca, njegovog SApM i Str_Def. Filtriramo one borce za koje ti podatci ne postoje.
+
+```{r}
+fightersdata=read.csv("fighter_details.csv")
+
+fightersdata=fightersdata[c("fighter_name","SApM","Str_Def")]
+fightersdata$Str_Def=parse_number(fightersdata$Str_Def)/100#postotak u decimale
+fightersdata <- filter(fightersdata,  fightersdata$SApM > 0)#mičemo fightere koji nemaju
+fightersdata <- filter(fightersdata,  fightersdata$Str_Def > 0)
+
+summary(fightersdata)
+
+```
+Pogledajmo odnos varijabli pomoću scatter plota. Nezavisna varijabla u našem slučaju je Str_Def. Iz priloženog grafa vidimo da postoji odnos između dvije varijable i nagađamo da je linearna. Što je veći Str_Def pretpostavljamo da će biti manji SApM. Također vidimo da postoje outlieri koji imaju izrazito veliki SApM za određeni Str_Def.
+
+
+```{r}
+plot(fightersdata$Str_Def,fightersdata$SApM,cex=0.45)
+
+```
+Namjestimo sada linearni model. 
+Prema grafu možemo pretpostaviti da pravac dobro opisuje odnos.
+
+```{r}
+fit.St = lm(SApM~Str_Def,data=fightersdata)
+
+plot(fightersdata$Str_Def,fightersdata$SApM,cex=0.45) #graficki prikaz podataka
+lines(fightersdata$Str_Def,fit.St$fitted.values,col='red') #graficki prikaz procijenjenih vrijednosti iz modela
+```
+Primjećujemo da postoji odnos, no da je varijanca velika i da postoji određen broj outliera. Provjeravamo normalnost reziduala.
+
+```{r}
+selected.model = fit.St
+
+
+#q-q plot reziduala s linijom normalne distribucije
+qqnorm(rstandard(selected.model))
+qqline(rstandard(selected.model))
+
+
+lillie.test(rstandard(fit.St))
+
+```
+
+
+Lilliefors testom dolazimo do zaključka da naši reziduali nisu normalno distribuirani.
+
+```{r}
+summary(fit.St)
+```
+Nakon obavljenog summary-a, imamo sljedeće činjenice. 
+Reziduali nam nisu normalno distribuirani, nemamo veliki R-squared, no Str_Def je jako značajan po p-vrijednosti i imamo jako malu p-vrijednost u F statistici. Ovaj model nije najbolji za predviđanje borčevog SApM, no to nije ni bio cilj istraživanja. Cilj je bio pokazati da postoji veza između Str_Def i SApM, i sudeći po rezultatima ove linearne regresije vidimo da je Str_Def vrlo značajan za vrijednost SApM(<2e-16 ). Po tome zaključujemo da Str_Def igra ulogu u određivanju SApM. Naša pretpostavka zašto model za predviđanje nije još dovoljno dobar je da je potrebno još varijabli koje bi objasnile varijancu, što ostavljamo za buduća istraživanja.
